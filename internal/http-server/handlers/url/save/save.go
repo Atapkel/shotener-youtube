@@ -30,20 +30,19 @@ type URLSaver interface {
 }
 
 func New(log *slog.Logger, saver URLSaver) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return func(writer http.ResponseWriter, request *http.Request) {
 		const op = "handlers.url.save.New"
 
-		log = log.With(
+		log.With(
 			slog.String("op", op),
-			slog.String("request_id", middleware.GetReqID(r.Context())),
+			slog.String("requestID", middleware.GetReqID(request.Context())),
 		)
 
 		var req Request
-
-		err := render.DecodeJSON(r.Body, &req)
+		err := render.DecodeJSON(request.Body, &req)
 		if err != nil {
 			log.Error("failed to decode request body", sl.Err(err))
-			render.JSON(w, r, response.Error("failed to decode request"))
+			render.JSON(writer, request, response.Error("failed to decode request"))
 			return
 		}
 
@@ -51,7 +50,7 @@ func New(log *slog.Logger, saver URLSaver) http.HandlerFunc {
 		if err := validator.New().Struct(req); err != nil {
 			validateErr := err.(validator.ValidationErrors)
 			log.Error("invalid request", sl.Err(err))
-			render.JSON(w, r, response.ValidationError(validateErr))
+			render.JSON(writer, request, response.ValidationError(validateErr))
 			return
 		}
 		alias := req.Alias
@@ -60,17 +59,21 @@ func New(log *slog.Logger, saver URLSaver) http.HandlerFunc {
 		}
 
 		id, err := saver.SaveURL(req.URL, alias)
-		if errors.Is(err, storage.ErrUrlExists) {
+		if errors.Is(err, storage.ErrURLExists) {
 			log.Info("url already exists", slog.String("url", req.URL))
-			render.JSON(w, r, response.Error("url already exists"))
+			render.JSON(writer, request, response.Error("url already exists"))
 			return
 		}
 		if err != nil {
 			log.Info("failed to add db", sl.Err(err))
-			render.JSON(w, r, response.Error("failed to add db"))
+			render.JSON(writer, request, response.Error("failed to add url"))
 			return
 		}
+		log.Info("url added", slog.Int64("id", id))
 
+		render.JSON(writer, request, Response{
+			Response: response.OK(),
+			Alias:    alias},
+		)
 	}
-
 }
